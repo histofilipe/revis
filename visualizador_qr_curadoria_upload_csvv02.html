@@ -1,0 +1,347 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Visualizador QR • Upload CSV • Curadoria</title>
+  <style>
+    :root{
+      --ok:#0a7a2e; --bad:#b00020; --warn:#b26a00;
+      --bg:#0b0f14; --card:#121926; --text:#e8eef7; --muted:#a9b4c4;
+      --btn:#1b2638; --border:rgba(255,255,255,.12);
+    }
+    body{margin:0;padding:16px;font-family:system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;background:var(--bg);color:var(--text);}
+    .wrap{max-width:560px;margin:0 auto;}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:14px;box-shadow:0 10px 30px rgba(0,0,0,.35);}
+    h1{font-size:18px;margin:0 0 10px;}
+    p{margin:8px 0;color:var(--muted);line-height:1.35;font-size:14px;}
+    #reader{width:100%;border-radius:14px;overflow:hidden;border:1px solid var(--border);background:#000;min-height:220px;}
+    .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px;}
+    button, input[type="file"]{
+      appearance:none;border:1px solid var(--border);background:var(--btn);color:var(--text);
+      padding:10px 12px;border-radius:12px;font-weight:700;cursor:pointer;
+    }
+    input[type="file"]{width:100%;font-weight:600;cursor:pointer;}
+    button:active{transform:translateY(1px);}
+    .status{margin-top:12px;padding:12px;border-radius:14px;border:1px solid var(--border);background:rgba(255,255,255,.04);}
+    .pill{display:inline-block;padding:4px 10px;border-radius:999px;font-weight:900;letter-spacing:.2px;font-size:12px;border:1px solid transparent;}
+    .pill.ok{background:rgba(10,122,46,.22);color:#9af7b4;border-color:rgba(10,122,46,.35);}
+    .pill.bad{background:rgba(176,0,32,.22);color:#ffb3c2;border-color:rgba(176,0,32,.35);}
+    .pill.warn{background:rgba(178,106,0,.22);color:#ffd59a;border-color:rgba(178,106,0,.35);}
+    .kv{margin-top:8px;}
+    .kv b{color:var(--text);}
+    .small{font-size:12px;color:var(--muted);}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;}
+    .hr{height:1px;background:var(--border);margin:12px 0;}
+  </style>
+
+  <!-- Leitor de QR via câmera (CDN) -->
+  <script src="https://unpkg.com/html5-qrcode@2.3.10/html5-qrcode.min.js"></script>
+</head>
+
+<body>
+  <div class="wrap">
+    <div class="card">
+      <h1>Leitor de QR • Curadoria (com upload do CSV)</h1>
+      <p>
+        1) Faça upload do seu CSV (separador <span class="mono">;</span>)<br/>
+        2) Toque em <b>Testar câmera</b> para checar permissão<br/>
+        3) Toque em <b>Iniciar câmera</b> e leia o QR
+      </p>
+
+      <input id="csvFile" type="file" accept=".csv,text/csv" />
+
+      <div class="row">
+        <button id="btnParse">Carregar CSV</button>
+        <button id="btnCamTest">Testar câmera</button>
+      </div>
+
+      <div class="status" id="csvStatus">
+        <span class="pill warn" id="csvPill">CSV não carregado</span>
+        <div class="kv"><b>NPs analisados:</b> <span class="mono" id="csvCount">0</span></div>
+        <div class="small" id="csvHint">Carregue o CSV para ativar a verificação.</div>
+      </div>
+
+      <div class="hr"></div>
+
+      <div id="reader"></div>
+
+      <div class="row">
+        <button id="btnStart" disabled>Iniciar câmera</button>
+        <button id="btnStop" disabled>Parar</button>
+        <button id="btnTorch" style="display:none;" disabled>Lanterna</button>
+      </div>
+
+      <div class="status" id="statusBox">
+        <span class="pill warn" id="pill">Aguardando…</span>
+        <div class="kv"><b>QR lido:</b> <span class="mono" id="qrText">—</span></div>
+        <div class="kv"><b>Resultado:</b> <span id="resultText">Carregue o CSV para começar.</span></div>
+        <div class="small" id="hint">
+          A normalização tenta extrair padrões tipo <span class="mono">AB001_A_0001</span> mesmo se o QR vier em URL/texto maior.
+        </div>
+      </div>
+
+      <p class="small">
+        Regra: considera “analisado” se o código lido existir em <span class="mono">npAnalise</span> dentro de linhas com
+        <span class="mono">branchTipoAtividade = "curadoria"</span>.
+      </p>
+    </div>
+  </div>
+
+  <script>
+    // ====== Estado ======
+    let analyzedSet = new Set();
+    let html5QrCode = null;
+    let lastCode = "";
+    let torchOn = false;
+
+    // ====== Elementos ======
+    const csvFile = document.getElementById("csvFile");
+    const btnParse = document.getElementById("btnParse");
+    const btnCamTest = document.getElementById("btnCamTest");
+
+    const csvPill = document.getElementById("csvPill");
+    const csvCount = document.getElementById("csvCount");
+    const csvHint = document.getElementById("csvHint");
+
+    const pill = document.getElementById("pill");
+    const qrText = document.getElementById("qrText");
+    const resultText = document.getElementById("resultText");
+
+    const btnStart = document.getElementById("btnStart");
+    const btnStop = document.getElementById("btnStop");
+    const btnTorch = document.getElementById("btnTorch");
+
+    // ====== UI helpers ======
+    function setCsvOk(count, msg){
+      csvPill.className = "pill ok";
+      csvPill.textContent = "CSV carregado ✓";
+      csvCount.textContent = String(count);
+      csvHint.textContent = msg || "Pronto para ler QRCode.";
+      btnStart.disabled = false;
+    }
+    function setCsvBad(msg){
+      csvPill.className = "pill bad";
+      csvPill.textContent = "Erro no CSV ✗";
+      csvCount.textContent = "0";
+      csvHint.textContent = msg || "Falha ao ler CSV.";
+      btnStart.disabled = true;
+    }
+    function setCsvWarn(msg){
+      csvPill.className = "pill warn";
+      csvPill.textContent = "CSV não carregado";
+      csvCount.textContent = "0";
+      csvHint.textContent = msg || "Carregue o CSV para ativar a verificação.";
+      btnStart.disabled = true;
+    }
+
+    function setOk(qr, msg){
+      pill.className = "pill ok";
+      pill.textContent = "ANALISADO ✓";
+      qrText.textContent = qr || "—";
+      resultText.textContent = msg || "Encontrado em npAnalise (curadoria).";
+    }
+    function setBad(qr, msg){
+      pill.className = "pill bad";
+      pill.textContent = "NÃO ANALISADO ✗";
+      qrText.textContent = qr || "—";
+      resultText.textContent = msg || "Não encontrado em npAnalise (curadoria).";
+    }
+    function setWarn(qr, msg){
+      pill.className = "pill warn";
+      pill.textContent = "ATENÇÃO";
+      qrText.textContent = qr || "—";
+      resultText.textContent = msg || "—";
+    }
+
+    // ====== Normalização do QR ======
+    function normalizeCode(raw){
+      if (!raw) return "";
+      let s = String(raw).trim();
+      s = s.replace(/%5F/g, "_");
+      // tenta extrair padrão comum: LETRAS+NUM _ LETRA _ NUM
+      const m1 = s.match(/([A-Z]{2,6}\d{0,4}_[A-Z]_\d{3,6})/i);
+      if (m1) return m1[1].toUpperCase();
+      s = s.replace(/\s+/g, "");
+      return s.toUpperCase();
+    }
+
+    // ====== CSV parsing (sem libs externas) ======
+    // Observação: parser simples; funciona bem para CSV padrão do seu projeto (sep=";")
+    function splitCsvLine(line){
+      // separa por ; respeitando aspas duplas
+      const out = [];
+      let cur = "";
+      let inQuotes = false;
+      for (let i=0;i<line.length;i++){
+        const ch = line[i];
+        if (ch === '"'){
+          // se estiver "" vira "
+          if (inQuotes && line[i+1] === '"'){ cur += '"'; i++; }
+          else { inQuotes = !inQuotes; }
+        } else if (ch === ';' && !inQuotes){
+          out.push(cur);
+          cur = "";
+        } else {
+          cur += ch;
+        }
+      }
+      out.push(cur);
+      return out;
+    }
+
+    async function loadCsv(){
+      const f = csvFile.files && csvFile.files[0];
+      if (!f){
+        setCsvWarn("Selecione um arquivo CSV primeiro.");
+        return;
+      }
+
+      try{
+        const text = await f.text();
+        const lines = text.split(/\r?\n/).filter(x => x.trim().length > 0);
+        if (lines.length < 2){
+          setCsvBad("CSV parece vazio (poucas linhas).");
+          return;
+        }
+
+        const header = splitCsvLine(lines[0]).map(h => h.trim());
+        const idxTipo = header.findIndex(h => h.toLowerCase() === "branchtipoatividade");
+        const idxNpA  = header.findIndex(h => h.toLowerCase() === "npanalise");
+
+        if (idxTipo < 0 || idxNpA < 0){
+          setCsvBad("Não achei as colunas 'branchTipoAtividade' e/ou 'npAnalise' no CSV.");
+          return;
+        }
+
+        const set = new Set();
+        for (let i=1;i<lines.length;i++){
+          const row = splitCsvLine(lines[i]);
+          const tipo = (row[idxTipo] ?? "").trim().toLowerCase();
+          if (tipo !== "curadoria") continue;
+
+          let np = (row[idxNpA] ?? "").trim();
+          if (!np || np.toLowerCase() === "nan") continue;
+          np = normalizeCode(np); // normaliza também o que veio no CSV
+          if (np) set.add(np);
+        }
+
+        analyzedSet = set;
+
+        if (analyzedSet.size === 0){
+          setCsvBad("Carregou, mas não encontrei nenhum npAnalise com branchTipoAtividade='curadoria'.");
+          return;
+        }
+
+        setCsvOk(analyzedSet.size, "CSV carregado. Agora você pode iniciar a câmera.");
+        setWarn("—", "CSV carregado. Toque em “Iniciar câmera” para ler o QR.");
+
+      } catch(e){
+        setCsvBad("Erro ao ler o CSV. Tente novamente.");
+      }
+    }
+
+    // ====== Teste de câmera ======
+    async function testCamera(){
+      try{
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+          setWarn("—", "Seu navegador não suporta acesso à câmera (getUserMedia).");
+          return;
+        }
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+        // se chegou aqui, OK. Para imediatamente:
+        stream.getTracks().forEach(t => t.stop());
+        setWarn("—", "Permissão de câmera OK ✓ (você pode iniciar o scanner).");
+      } catch(e){
+        // e.name: NotAllowedError, NotFoundError, NotReadableError etc.
+        setWarn("—", "Não consegui acessar a câmera. Verifique permissões do navegador e se existe câmera traseira.");
+      }
+    }
+
+    // ====== QR Scanner ======
+    async function startScanner(){
+      if (analyzedSet.size === 0){
+        setWarn("—", "Carregue o CSV antes de iniciar a câmera.");
+        return;
+      }
+      if (html5QrCode) return;
+
+      html5QrCode = new Html5Qrcode("reader");
+      const config = { fps: 12, qrbox: { width: 260, height: 260 }, rememberLastUsedCamera: true, aspectRatio: 1.0 };
+
+      try{
+        await html5QrCode.start(
+          { facingMode: "environment" },
+          config,
+          async (decodedText) => {
+            const code = normalizeCode(decodedText);
+            if (!code || code === lastCode) return;
+            lastCode = code;
+
+            if (analyzedSet.has(code)) setOk(code, "Este NP aparece em npAnalise (curadoria).");
+            else setBad(code, "Este NP NÃO aparece em npAnalise (curadoria).");
+
+            if (navigator.vibrate) navigator.vibrate(60);
+
+            // habilita lanterna se suportado
+            try{
+              const cap = await html5QrCode.getRunningTrackCapabilities();
+              if (cap && cap.torch){
+                btnTorch.style.display = "inline-block";
+                btnTorch.disabled = false;
+              }
+            } catch(_) {}
+          },
+          (err) => {}
+        );
+
+        btnStop.disabled = false;
+        btnStart.disabled = true;
+
+      } catch(e){
+        html5QrCode = null;
+        setWarn("—", "Falha ao iniciar a câmera. Verifique permissões.");
+      }
+    }
+
+    async function stopScanner(){
+      if (!html5QrCode) return;
+      try{
+        await html5QrCode.stop();
+        await html5QrCode.clear();
+      } catch(e){}
+      html5QrCode = null;
+      btnTorch.style.display = "none";
+      btnTorch.disabled = true;
+      torchOn = false;
+      btnStop.disabled = true;
+      btnStart.disabled = (analyzedSet.size === 0);
+      setWarn("—", "Scanner parado.");
+    }
+
+    async function toggleTorch(){
+      if (!html5QrCode) return;
+      try{
+        torchOn = !torchOn;
+        await html5QrCode.applyVideoConstraints({ advanced: [{ torch: torchOn }] });
+        btnTorch.textContent = torchOn ? "Lanterna: ON" : "Lanterna";
+      } catch(e){
+        btnTorch.style.display = "none";
+        btnTorch.disabled = true;
+      }
+    }
+
+    // ====== Eventos ======
+    btnParse.addEventListener("click", loadCsv);
+    btnCamTest.addEventListener("click", testCamera);
+    btnStart.addEventListener("click", startScanner);
+    btnStop.addEventListener("click", stopScanner);
+    btnTorch.addEventListener("click", toggleTorch);
+
+    // Estado inicial
+    setCsvWarn();
+    btnStop.disabled = true;
+    btnStart.disabled = true;
+  </script>
+</body>
+</html>
