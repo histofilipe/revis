@@ -40,9 +40,25 @@
     .small{font-size:12px;color:var(--muted);}
     .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,"Liberation Mono","Courier New",monospace;}
     .hr{height:1px;background:var(--border);margin:12px 0;}
+    /*
+      ✅ CÂMERA 50% MENOR (desktop/tablet):
+      - reduz a largura do preview para 50% (altura acompanha proporcionalmente)
+      - centraliza o bloco
+      - em telas pequenas, volta para 100% (para não ficar minúsculo no celular)
+    */
     .videoWrap{
-      margin-top:10px;border:1px solid var(--border);border-radius:14px;overflow:hidden;background:#000;
-      min-height:240px;
+      margin-top:10px;
+      border:1px solid var(--border);
+      border-radius:14px;
+      overflow:hidden;
+      background:#000;
+      width:50%;
+      margin-left:auto;
+      margin-right:auto;
+      min-height:120px; /* fallback */
+    }
+    @media (max-width: 520px){
+      .videoWrap{ width:100%; }
     }
     video{width:100%;height:auto;display:block;background:#000;}
     canvas{display:none;}
@@ -62,6 +78,7 @@
       <div class="row">
         <button id="btnParse">Carregar CSV</button>
         <button id="btnCamTest">Testar câmera</button>
+        <button id="btnNext" disabled>Nova NP</button>
       </div>
 
       <div class="status" id="csvStatus">
@@ -111,6 +128,7 @@
   const csvFile = document.getElementById("csvFile");
   const btnParse = document.getElementById("btnParse");
   const btnCamTest = document.getElementById("btnCamTest");
+  const btnNext = document.getElementById("btnNext");
   const btnStart = document.getElementById("btnStart");
   const btnStop = document.getElementById("btnStop");
 
@@ -136,6 +154,7 @@
     csvCount.textContent = String(count);
     csvHint.textContent = msg || "Pronto para ler QRCode.";
     btnStart.disabled = false;
+    btnNext.disabled = false;
   }
   function setCsvBad(msg){
     csvPill.className = "pill bad";
@@ -143,6 +162,7 @@
     csvCount.textContent = "0";
     csvHint.textContent = msg || "Falha ao ler CSV.";
     btnStart.disabled = true;
+    btnNext.disabled = true;
   }
   function setCsvWarn(msg){
     csvPill.className = "pill warn";
@@ -150,6 +170,7 @@
     csvCount.textContent = "0";
     csvHint.textContent = msg || "Carregue o CSV para ativar a verificação.";
     btnStart.disabled = true;
+    btnNext.disabled = true;
   }
 
   function setOk(qr, msg){
@@ -169,6 +190,20 @@
     pill.textContent = "ATENÇÃO";
     qrText.textContent = qr || "—";
     resultText.textContent = msg || "—";
+  }
+
+  // =========================
+  // RESET PARA LER UMA NOVA NP (sem recarregar CSV nem reiniciar câmera)
+  // =========================
+  function resetForNextNp(){
+    lastCode = "";
+    // Mantém a câmera rodando, apenas limpa o último resultado
+    pill.className = "pill warn";
+    pill.textContent = scanning ? "LENDO…" : "AGUARDANDO…";
+    qrText.textContent = "—";
+    resultText.textContent = scanning
+      ? "Pronto: aponte para o próximo QR." 
+      : "Pronto. Inicie a câmera para ler o próximo QR.";
   }
 
   // =========================
@@ -369,6 +404,7 @@
   // =========================
   btnParse.addEventListener("click", loadCsv);
   btnCamTest.addEventListener("click", testCamera);
+  btnNext.addEventListener("click", resetForNextNp);
   btnStart.addEventListener("click", startScanner);
   btnStop.addEventListener("click", stopScanner);
 
