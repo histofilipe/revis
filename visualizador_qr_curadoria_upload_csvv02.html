@@ -70,6 +70,37 @@
     }
     video{width:100%;height:auto;display:block;background:#000;}
     canvas{display:none;}
+    
+    /* Controle de som */
+    .sound-control {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 12px;
+      padding: 8px;
+      background: rgba(255,255,255,.05);
+      border-radius: 10px;
+    }
+    .sound-control label {
+      font-size: 13px;
+      color: var(--muted);
+    }
+    .sound-control input[type="range"] {
+      flex-grow: 1;
+      height: 6px;
+      -webkit-appearance: none;
+      background: var(--btn);
+      border-radius: 3px;
+      outline: none;
+    }
+    .sound-control input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: var(--info);
+      cursor: pointer;
+    }
   </style>
 </head>
 
@@ -105,9 +136,16 @@
         <div class="small" id="hint">
           Dica: se o QR vier com URL/texto extra, o sistema tenta extrair padrões como <span class="mono">AB001_A_0001</span>.
         </div>
+        
+        <!-- Controle de som -->
+        <div class="sound-control">
+          <label for="volumeControl">Volume do alerta:</label>
+          <input type="range" id="volumeControl" min="0" max="100" value="70">
+          <span id="volumeValue">70%</span>
+        </div>
+        
         <div class="small" id="secureHint" style="margin-top:8px;"></div>
       </div>
-
 
       <div class="videoWrap">
         <video id="video" playsinline></video>
@@ -130,6 +168,10 @@
   let scanning = false;
   let lastCode = "";
   let rafId = null;
+  
+  // Contexto de áudio para o bip
+  let audioContext = null;
+  let beepVolume = 0.7; // volume padrão 70%
 
   // =========================
   // ELEMENTOS
@@ -139,6 +181,9 @@
   const btnNext = document.getElementById("btnNext");
   const btnStart = document.getElementById("btnStart");
   const btnStop = document.getElementById("btnStop");
+  
+  const volumeControl = document.getElementById("volumeControl");
+  const volumeValue = document.getElementById("volumeValue");
 
   const csvPill = document.getElementById("csvPill");
   const csvCount = document.getElementById("csvCount");
@@ -153,6 +198,65 @@
   const video = document.getElementById("video");
   const canvas = document.getElementById("canvas");
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+  // =========================
+  // FUNÇÃO PARA TOCAR BIP (quando resultado é negativo)
+  // =========================
+  function playBeep() {
+    try {
+      // Cria contexto de áudio se não existir
+      if (!audioContext) {
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      }
+      
+      // Cria oscilador para gerar o som
+      const oscillator = audioContext.createOscillator();
+      const gainNode = audioContext.createGain();
+      
+      // Configura o som (bip agudo para alerta)
+      oscillator.type = 'sine'; // tipo de onda: sine, square, sawtooth, triangle
+      oscillator.frequency.value = 800; // frequência em Hz (tom agudo)
+      
+      // Configura volume
+      gainNode.gain.value = beepVolume;
+      
+      // Conecta os nós
+      oscillator.connect(gainNode);
+      gainNode.connect(audioContext.destination);
+      
+      // Toca o som: 200ms de bip
+      oscillator.start();
+      
+      // Fade out para evitar estalo
+      gainNode.gain.exponentialRampToValueAtTime(0.001, audioContext.currentTime + 0.2);
+      
+      // Para o oscilador após 200ms
+      setTimeout(() => {
+        oscillator.stop();
+      }, 200);
+      
+    } catch (e) {
+      console.warn("Não foi possível tocar o bip:", e);
+      // Fallback: tenta usar HTML5 Audio se Web Audio API não funcionar
+      try {
+        const audio = new Audio();
+        const context = new (window.AudioContext || window.webkitAudioContext)();
+        const oscillator = context.createOscillator();
+        const gainNode = context.createGain();
+        
+        oscillator.connect(gainNode);
+        gainNode.connect(context.destination);
+        
+        oscillator.frequency.value = 800;
+        gainNode.gain.value = beepVolume;
+        
+        oscillator.start();
+        setTimeout(() => oscillator.stop(), 200);
+      } catch (e2) {
+        console.warn("Fallback de áudio também falhou:", e2);
+      }
+    }
+  }
 
   // =========================
   // CONTEXTO SEGURO (HTTPS)
@@ -196,48 +300,6 @@
     btnNext.disabled = true;
   }
 
-  // =========================
-  // ÁUDIO (BIP NO NEGATIVO)
-  // =========================
-  function beepNegativo(durationMs = 120, freqHz = 880, volume = 0.08){
-    try{
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if(!AudioCtx) return;
-
-      const ctx = new AudioCtx();
-      if(ctx.state === "suspended") ctx.resume().catch(()=>{});
-
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = "square";
-      osc.frequency.value = freqHz;
-      gain.gain.value = volume;
-
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start();
-      setTimeout(() => {
-        try{ osc.stop(); }catch(_){}
-        ctx.close().catch(()=>{});
-      }, durationMs);
-    }catch(e){
-      // se falhar, não toca
-    }
-  }
-
-  // Destrava áudio após interação do usuário (alguns browsers exigem isso)
-  async function unlockAudioOnce(){
-    try{
-      const AudioCtx = window.AudioContext || window.webkitAudioContext;
-      if(!AudioCtx) return;
-      const ctx = new AudioCtx();
-      await ctx.resume().catch(()=>{});
-      await ctx.close().catch(()=>{});
-    }catch(e){}
-  }
-
   function setOk(qr, msg){
     pill.className = "pill ok";
     if (resultStatus) resultStatus.className = "status result ok";
@@ -245,16 +307,20 @@
     qrText.textContent = qr || "—";
     resultText.textContent = msg || "Encontrado em npAnalise (curadoria).";
   }
+  
   function setBad(qr, msg){
     pill.className = "pill bad";
     if (resultStatus) resultStatus.className = "status result bad";
     pill.textContent = "NÃO ANALISADO ✗";
     qrText.textContent = qr || "—";
     resultText.textContent = msg || "Não encontrado em npAnalise (curadoria).";
+    
+    // Toca o bip quando for negativo
+    playBeep();
   }
+  
   function setWarn(qr, msg){
     pill.className = "pill warn";
-    if (resultStatus) resultStatus.className = "status result warn";
     if (resultStatus) resultStatus.className = "status result warn";
     pill.textContent = "ATENÇÃO";
     qrText.textContent = qr || "—";
@@ -442,8 +508,11 @@
         const norm = normalizeCode(code.data);
         if (norm && norm !== lastCode){
           lastCode = norm;
-          if (analyzedSet.has(norm)) setOk(norm, "Este NP aparece em npAnalise (curadoria).");
-          else setBad(norm, "Este NP NÃO aparece em npAnalise (curadoria).");
+          if (analyzedSet.has(norm)) {
+            setOk(norm, "Este NP aparece em npAnalise (curadoria).");
+          } else {
+            setBad(norm, "Este NP NÃO aparece em npAnalise (curadoria).");
+          }
 
           if (navigator.vibrate) navigator.vibrate(60);
         }
@@ -458,8 +527,14 @@
   // =========================
   btnParse.addEventListener("click", loadCsv);
   btnNext.addEventListener("click", resetForNextNp);
-  btnStart.addEventListener("click", async () => { await unlockAudioOnce(); return startScanner(); });
+  btnStart.addEventListener("click", startScanner);
   btnStop.addEventListener("click", stopScanner);
+
+  // Controle de volume
+  volumeControl.addEventListener("input", function() {
+    beepVolume = this.value / 100;
+    volumeValue.textContent = this.value + "%";
+  });
 
   // Estado inicial
   setCsvWarn();
