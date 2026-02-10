@@ -13,7 +13,7 @@
 
   <style>
     :root{
-      --ok:#0a7a2e; --bad:#b00020; --warn:#b26a00;
+      --ok:#0a7a2e; --bad:#b00020; --warn:#b26a00; --info:#2d7ff9;
       --bg:#0b0f14; --card:#121926; --text:#e8eef7; --muted:#a9b4c4;
       --btn:#1b2638; --border:rgba(255,255,255,.12);
     }
@@ -35,6 +35,14 @@
     .pill.ok{background:rgba(10,122,46,.22);color:#9af7b4;border-color:rgba(10,122,46,.35);}
     .pill.bad{background:rgba(176,0,32,.22);color:#ffb3c2;border-color:rgba(176,0,32,.35);}
     .pill.warn{background:rgba(178,106,0,.22);color:#ffd59a;border-color:rgba(178,106,0,.35);}
+
+    .pill.info{background:rgba(45,127,249,.22);color:#b9d6ff;border-color:rgba(45,127,249,.40);}
+    /* Resultado: muda cor do texto inteiro conforme positivo/negativo */
+    .status.result.ok{border-color:rgba(10,122,46,.35);background:rgba(10,122,46,.08);}
+    .status.result.ok .kv, .status.result.ok b, .status.result.ok #qrText, .status.result.ok #resultText{color:#9af7b4;}
+    .status.result.bad{border-color:rgba(176,0,32,.35);background:rgba(176,0,32,.08);}
+    .status.result.bad .kv, .status.result.bad b, .status.result.bad #qrText, .status.result.bad #resultText{color:#ffb3c2;}
+    .status.result.warn{border-color:rgba(178,106,0,.35);background:rgba(178,106,0,.08);}
     .kv{margin-top:8px;}
     .kv b{color:var(--text);}
     .small{font-size:12px;color:var(--muted);}
@@ -70,14 +78,14 @@
     <div class="card">
       <h1>Leitor de QR • Curadoria (Upload CSV)</h1>
       <p>
-        Fluxo: <b>1)</b> carregar CSV <b>2)</b> testar câmera <b>3)</b> iniciar leitura do QR.<br/>
+        Fluxo: <b>1)</b> carregar CSV <b>2)</b> iniciar câmera <b>3)</b> ler QR.<br/>
         Regra: <span class="mono">branchTipoAtividade="curadoria"</span> → comparar QR com <span class="mono">npAnalise</span>.
       </p>
 
       <input id="csvFile" type="file" accept=".csv,text/csv" />
       <div class="row">
         <button id="btnParse">Carregar CSV</button>
-        <button id="btnCamTest">Testar câmera</button>
+        <button id="btnStart" disabled>Iniciar câmera</button>
         <button id="btnNext" disabled>Nova NP</button>
       </div>
 
@@ -89,16 +97,8 @@
 
       <div class="hr"></div>
 
-      <div class="videoWrap">
-        <video id="video" playsinline></video>
-      </div>
-
-      <div class="row">
-        <button id="btnStart" disabled>Iniciar câmera</button>
-        <button id="btnStop" disabled>Parar</button>
-      </div>
-
-      <div class="status">
+      <!-- Resultado/QR (agora acima do vídeo) -->
+      <div class="status result warn" id="resultStatus">
         <span class="pill warn" id="pill">Aguardando…</span>
         <div class="kv"><b>QR lido:</b> <span class="mono" id="qrText">—</span></div>
         <div class="kv"><b>Resultado:</b> <span id="resultText">Carregue o CSV para começar.</span></div>
@@ -106,6 +106,15 @@
           Dica: se o QR vier com URL/texto extra, o sistema tenta extrair padrões como <span class="mono">AB001_A_0001</span>.
         </div>
         <div class="small" id="secureHint" style="margin-top:8px;"></div>
+      </div>
+
+
+      <div class="videoWrap">
+        <video id="video" playsinline></video>
+      </div>
+
+      <div class="row">
+        <button id="btnStop" disabled>Parar</button>
       </div>
 
       <canvas id="canvas"></canvas>
@@ -127,7 +136,6 @@
   // =========================
   const csvFile = document.getElementById("csvFile");
   const btnParse = document.getElementById("btnParse");
-  const btnCamTest = document.getElementById("btnCamTest");
   const btnNext = document.getElementById("btnNext");
   const btnStart = document.getElementById("btnStart");
   const btnStop = document.getElementById("btnStop");
@@ -140,6 +148,7 @@
   const qrText = document.getElementById("qrText");
   const resultText = document.getElementById("resultText");
   const secureHint = document.getElementById("secureHint");
+  const resultStatus = document.getElementById("resultStatus");
 
   const video = document.getElementById("video");
   const canvas = document.getElementById("canvas");
@@ -149,7 +158,7 @@
   // UI HELPERS
   // =========================
   function setCsvOk(count, msg){
-    csvPill.className = "pill ok";
+    csvPill.className = "pill info";
     csvPill.textContent = "CSV carregado ✓";
     csvCount.textContent = String(count);
     csvHint.textContent = msg || "Pronto para ler QRCode.";
@@ -175,18 +184,22 @@
 
   function setOk(qr, msg){
     pill.className = "pill ok";
+    if (resultStatus) resultStatus.className = "status result ok";
     pill.textContent = "ANALISADO ✓";
     qrText.textContent = qr || "—";
     resultText.textContent = msg || "Encontrado em npAnalise (curadoria).";
   }
   function setBad(qr, msg){
     pill.className = "pill bad";
+    if (resultStatus) resultStatus.className = "status result bad";
     pill.textContent = "NÃO ANALISADO ✗";
     qrText.textContent = qr || "—";
     resultText.textContent = msg || "Não encontrado em npAnalise (curadoria).";
   }
   function setWarn(qr, msg){
     pill.className = "pill warn";
+    if (resultStatus) resultStatus.className = "status result warn";
+    if (resultStatus) resultStatus.className = "status result warn";
     pill.textContent = "ATENÇÃO";
     qrText.textContent = qr || "—";
     resultText.textContent = msg || "—";
@@ -199,6 +212,7 @@
     lastCode = "";
     // Mantém a câmera rodando, apenas limpa o último resultado
     pill.className = "pill warn";
+    if (resultStatus) resultStatus.className = "status result warn";
     pill.textContent = scanning ? "LENDO…" : "AGUARDANDO…";
     qrText.textContent = "—";
     resultText.textContent = scanning
@@ -279,7 +293,7 @@
           }
 
           setCsvOk(analyzedSet.size, "CSV carregado. Agora inicie a câmera.");
-          setWarn("—", "CSV OK. Agora toque em “Testar câmera” e depois “Iniciar câmera”.");
+          setWarn("—", "CSV OK. Agora toque em “Iniciar câmera”.");
         } catch(e){
           setCsvBad("Erro ao processar o CSV.");
         }
@@ -289,38 +303,8 @@
   }
 
   // =========================
-  // TESTE DE CÂMERA (permite ver o motivo do bloqueio)
+  // CONTEXTO SEGURO (HTTPS)
   // =========================
-  function isSecureContextOk(){
-    // getUserMedia geralmente exige HTTPS (ou localhost)
-    const ok = window.isSecureContext || location.hostname === "localhost";
-    return ok;
-  }
-
-  async function testCamera(){
-    if (!isSecureContextOk()){
-      setWarn("—", "Este site precisa estar em HTTPS (GitHub Pages/Netlify/Vercel) para liberar câmera.");
-      secureHint.textContent = "⚠️ Abra via https://... (não use file:// ou Raw do GitHub).";
-      return;
-    }
-    secureHint.textContent = "";
-
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
-      setWarn("—", "Seu navegador não suporta acesso à câmera (getUserMedia).");
-      return;
-    }
-    try{
-      const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-      s.getTracks().forEach(t => t.stop());
-      setWarn("—", "Permissão de câmera OK ✓");
-    } catch(e){
-      const name = e?.name || "Erro";
-      if (name === "NotAllowedError") setWarn("—", "Permissão negada. Ative Câmera nas permissões do site.");
-      else if (name === "NotFoundError") setWarn("—", "Nenhuma câmera encontrada.");
-      else if (name === "NotReadableError") setWarn("—", "Câmera ocupada por outro app.");
-      else setWarn("—", "Não consegui acessar a câmera. Verifique permissões.");
-    }
-  }
 
   // =========================
   // SCAN via jsQR (frame-by-frame)
@@ -403,7 +387,6 @@
   // EVENTOS
   // =========================
   btnParse.addEventListener("click", loadCsv);
-  btnCamTest.addEventListener("click", testCamera);
   btnNext.addEventListener("click", resetForNextNp);
   btnStart.addEventListener("click", startScanner);
   btnStop.addEventListener("click", stopScanner);
