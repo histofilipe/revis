@@ -196,6 +196,48 @@
     btnNext.disabled = true;
   }
 
+  // =========================
+  // ÁUDIO (BIP NO NEGATIVO)
+  // =========================
+  function beepNegativo(durationMs = 120, freqHz = 880, volume = 0.08){
+    try{
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if(!AudioCtx) return;
+
+      const ctx = new AudioCtx();
+      if(ctx.state === "suspended") ctx.resume().catch(()=>{});
+
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      osc.type = "square";
+      osc.frequency.value = freqHz;
+      gain.gain.value = volume;
+
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start();
+      setTimeout(() => {
+        try{ osc.stop(); }catch(_){}
+        ctx.close().catch(()=>{});
+      }, durationMs);
+    }catch(e){
+      // se falhar, não toca
+    }
+  }
+
+  // Destrava áudio após interação do usuário (alguns browsers exigem isso)
+  async function unlockAudioOnce(){
+    try{
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if(!AudioCtx) return;
+      const ctx = new AudioCtx();
+      await ctx.resume().catch(()=>{});
+      await ctx.close().catch(()=>{});
+    }catch(e){}
+  }
+
   function setOk(qr, msg){
     pill.className = "pill ok";
     if (resultStatus) resultStatus.className = "status result ok";
@@ -416,7 +458,7 @@
   // =========================
   btnParse.addEventListener("click", loadCsv);
   btnNext.addEventListener("click", resetForNextNp);
-  btnStart.addEventListener("click", startScanner);
+  btnStart.addEventListener("click", async () => { await unlockAudioOnce(); return startScanner(); });
   btnStop.addEventListener("click", stopScanner);
 
   // Estado inicial
