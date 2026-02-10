@@ -321,9 +321,24 @@
     }
     secureHint.textContent = "";
 
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia){
+      setBad("—", "Seu navegador não oferece getUserMedia(). Tente Chrome/Edge no Android/PC.");
+      return;
+    }
+
+    // tenta primeiro a câmera traseira; se falhar, tenta qualquer câmera disponível
+    const primaryConstraints = { video: { facingMode: { ideal: "environment" } }, audio: false };
+    const fallbackConstraints = { video: true, audio: false };
+
     try{
-      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+      stream = await navigator.mediaDevices.getUserMedia(primaryConstraints).catch(async (err)=>{
+        // fallback (muitos desktops/alguns Androids não aceitam facingMode)
+        return await navigator.mediaDevices.getUserMedia(fallbackConstraints);
+      });
+
       video.srcObject = stream;
+
+      // iOS/Safari às vezes precisa de playsinline + user gesture; já temos o click
       await video.play();
 
       scanning = true;
@@ -333,7 +348,10 @@
       setWarn("—", "Câmera ligada. Aponte para o QR…");
       scanLoop();
     } catch(e){
-      setWarn("—", "Falha ao iniciar câmera. Verifique permissões do site.");
+      const detail = (e && (e.name || e.message)) ? ` (${e.name || e.message})` : "";
+      setBad("—", "Falha ao iniciar câmera. Verifique permissões do site/navegador." + detail);
+      // dica extra: se o usuário negou permissão uma vez, precisa liberar nas configurações do site
+      secureHint.textContent = "Dica: clique no cadeado do navegador e permita 'Câmera', depois recarregue a página.";
     }
   }
 
