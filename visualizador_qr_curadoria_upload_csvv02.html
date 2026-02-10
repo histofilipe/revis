@@ -155,6 +155,20 @@
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
 
   // =========================
+  // CONTEXTO SEGURO (HTTPS)
+  // =========================
+  function isSecureContextOk(){
+    // Contexto seguro = HTTPS, localhost, ou file:// (neste último caso, câmera não funciona)
+    if (window.isSecureContext) return true;
+    
+    // Verifica também se está em localhost (mesmo sem HTTPS)
+    const host = window.location.hostname;
+    if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+    
+    return false;
+  }
+
+  // =========================
   // UI HELPERS
   // =========================
   function setCsvOk(count, msg){
@@ -301,10 +315,6 @@
       error: () => setCsvBad("Erro ao ler o CSV (parse).")
     });
   }
-
-  // =========================
-  // CONTEXTO SEGURO (HTTPS)
-  // =========================
 
   // =========================
   // SCAN via jsQR (frame-by-frame)
