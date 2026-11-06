@@ -3,8 +3,8 @@ package com.histofilipe.reanimecast
 import android.app.Activity
 import android.os.Bundle
 import android.view.View
-import android.view.ViewGroup
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Button
@@ -24,7 +24,17 @@ class MainActivity : Activity() {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = true
-            webViewClient = WebViewClient()
+            webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    val uri = request.url
+                    val scheme = uri.scheme?.lowercase()
+                    // WebView cannot navigate intent:// or other external app schemes.
+                    // Never execute an intent fallback URL supplied by a third-party page.
+                    if (scheme != "http" && scheme != "https") return true
+                    // Keep ordinary web navigation in WebView.
+                    return false
+                }
+            }
             webChromeClient = object : WebChromeClient() {
                 override fun onShowCustomView(view: View, callback: CustomViewCallback) {
                     if (fullscreenView != null) { callback.onCustomViewHidden(); return }
